@@ -1,5 +1,10 @@
 ## TW Scraper: A simple PHP Twitter search scraper.
 
+Installation:
+```
+composer require sergix44/twscraper
+```
+
 Example usage:
 ```php
 use SergiX44\Scraper\TwitterScraper;
