@@ -54,7 +54,11 @@ class TwitterScraper
 		$this->setOptions($timeout);
 	}
 
-	private function setOptions($timeout = self::TIMEOUT)
+    /**
+     * @param int $timeout
+     * @throws Exception
+     */
+    private function setOptions($timeout = self::TIMEOUT)
 	{
 		$this->options = [
 			'timeout' => $timeout,
@@ -101,9 +105,9 @@ class TwitterScraper
 	 * @param bool $flag
 	 * @return $this
 	 */
-	public function saveEveryPass(bool $flag = true)
+	public function saveEveryPass(bool $flag = null)
 	{
-		$this->saveEveryPass = $flag;
+		$this->saveEveryPass = $flag !== null ? $flag : !$this->saveEveryPass;
 		return $this;
 	}
 
@@ -265,7 +269,7 @@ class TwitterScraper
 				$replies = (int)$tweet->filter('.ProfileTweet-action--reply > .ProfileTweet-actionButton > .ProfileTweet-actionCount > span.ProfileTweet-actionCountForPresentation')->first()->text();
 				$text = $tweet->filter('.tweet-text')->first()->text();
 
-				$date = new \DateTime();
+				$date = new DateTime();
 				$date->setTimestamp((int)$tweet->filter('._timestamp')->first()->attr('data-time'));
 
 				$hashtags = [];
@@ -280,7 +284,7 @@ class TwitterScraper
 
 				$mentions = [];
 				$tweet->filter('.twitter-atreply')->each(function (Crawler $mentionsNode) use (&$mentions) {
-					$mentions[] = $mentionsNode->text();
+					$mentions[$mentionsNode->attr('data-mentioned-user-id')] = $mentionsNode->text();
 				});
 
 				$replying = [];
@@ -341,7 +345,7 @@ class TwitterScraper
 	 */
 	protected function save(array $tweets, bool $partials)
 	{
-		if (!$partials && $this->pathToFile !== null) {
+		if ((!$partials && $this->pathToFile !== null) || ($this->pathToFile !== null && $this->saveClosure === null)) {
 			file_put_contents($this->pathToFile, json_encode(array_values($tweets)));
 		}
 
