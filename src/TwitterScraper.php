@@ -206,7 +206,7 @@ class TwitterScraper
 		$hasAnotherPage = true;
 		$currentPosition = null;
 		$failState = false;
-		$requestUrl = "https://twitter.com/search?f=tweets&vertical=default&q={$query}&src=typd&l=en";
+		$requestUrl = "https://twitter.com/search?f=tweets&vertical=default&q={$query}&src=typd&qf=off";
 		do {
 
 			if ($firstPage) {
