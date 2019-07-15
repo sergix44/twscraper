@@ -48,17 +48,20 @@ class TwitterScraper
 	/** @var callable */
 	protected $saveClosure;
 
+	/** @var string */
+	private $lang = 'en';
+
 	private function __construct($timeout)
 	{
 		$this->client = new Client();
 		$this->setOptions($timeout);
 	}
 
-    /**
-     * @param int $timeout
-     * @throws Exception
-     */
-    private function setOptions($timeout = self::TIMEOUT)
+	/**
+	 * @param int $timeout
+	 * @throws Exception
+	 */
+	private function setOptions($timeout = self::TIMEOUT)
 	{
 		$this->options = [
 			'timeout' => $timeout,
@@ -75,6 +78,16 @@ class TwitterScraper
 	public static function make($timeout = self::TIMEOUT)
 	{
 		return new static($timeout);
+	}
+
+	/**
+	 * @param string $lang
+	 * @return $this
+	 */
+	public function setLang(string $lang)
+	{
+		$this->lang = $lang;
+		return $this;
 	}
 
 	/**
@@ -206,7 +219,7 @@ class TwitterScraper
 		$hasAnotherPage = true;
 		$currentPosition = null;
 		$failState = false;
-		$requestUrl = "https://twitter.com/search?f=tweets&vertical=default&q={$query}&src=typd&qf=off";
+		$requestUrl = "https://twitter.com/search?f=tweets&vertical=default&q={$query}&src=typd&qf=off&l={$this->lang}";
 		do {
 
 			if ($firstPage) {
@@ -323,7 +336,7 @@ class TwitterScraper
 			$this->logProgress();
 
 			$firstPage = false;
-			$requestUrl = "https://twitter.com/i/search/timeline?f=tweets&vertical=default&include_available_features=1&include_entities=1&reset_error_state=false&src=typd&max_position={$currentPosition}&q={$query}&l=en";
+			$requestUrl = "https://twitter.com/i/search/timeline?f=tweets&vertical=default&include_available_features=1&include_entities=1&reset_error_state=false&src=typd&max_position={$currentPosition}&q={$query}&l={$this->lang}";
 		} while ($hasAnotherPage);
 
 		return [$tweets, $oldestTweetDate];

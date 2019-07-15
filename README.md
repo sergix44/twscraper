@@ -14,6 +14,7 @@ $scraper = TwitterScraper::make()
 	->setSaveFile('tweets.json') // optional
 	->onSave(function(array $tweets) { ... }) // optional
 	->saveEveryPass() // optional
+	->setLang('it') // optional
 	->run();
 	
 $tweets = $scraper->getTweets();
