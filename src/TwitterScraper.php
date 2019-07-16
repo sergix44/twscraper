@@ -51,6 +51,9 @@ class TwitterScraper
 	/** @var string */
 	private $lang = 'en';
 
+	/** @var bool */
+	private $clearAfterEventSave = false;
+
 	private function __construct($timeout)
 	{
 		$this->client = new Client();
@@ -137,11 +140,13 @@ class TwitterScraper
 
 	/**
 	 * @param callable $closure
+	 * @param bool $shouldClear
 	 * @return $this
 	 */
-	public function onSave(callable $closure)
+	public function onSave(callable $closure, $shouldClear = false)
 	{
 		$this->saveClosure = $closure;
+		$this->clearAfterEventSave = $shouldClear;
 		return $this;
 	}
 
@@ -161,14 +166,13 @@ class TwitterScraper
 	 */
 	protected function query(string $query, ?DateTime $start = null, ?DateTime $end = null)
 	{
-		$start->setTime(0, 0, 0);
-		$end->setTime(0, 0, 0);
-
 		if ($start !== null && strpos($query, 'since') === false) {
+			$start->setTime(0, 0, 0);
 			$query .= " since:{$start->format('Y-m-d')}";
 		}
 
 		if ($end !== null && strpos($query, 'until') === false) {
+			$end->setTime(0, 0, 0);
 			$query .= " until:{$end->format('Y-m-d')}";
 		}
 
@@ -277,6 +281,7 @@ class TwitterScraper
 				$url = 'https://twitter.com' . $tweet->attr('data-permalink-path');
 				$userId = $tweet->filter('.account-group')->first()->attr('data-user-id');
 				$username = $tweet->filter('.username')->first()->text();
+				$userfullname = $tweet->filter('.fullname')->first()->text();
 				$likes = (int)$tweet->filter('.ProfileTweet-action--favorite > .ProfileTweet-actionButton > .ProfileTweet-actionCount > span.ProfileTweet-actionCountForPresentation')->first()->text();
 				$retweets = (int)$tweet->filter('.ProfileTweet-action--retweet > .ProfileTweet-actionButton > .ProfileTweet-actionCount > span.ProfileTweet-actionCountForPresentation')->first()->text();
 				$replies = (int)$tweet->filter('.ProfileTweet-action--reply > .ProfileTweet-actionButton > .ProfileTweet-actionCount > span.ProfileTweet-actionCountForPresentation')->first()->text();
@@ -316,6 +321,7 @@ class TwitterScraper
 						'datetime' => $date,
 						'user_id' => $userId,
 						'user_name' => $username,
+						'user_fullname' => $userfullname,
 						'retweets' => $retweets,
 						'replies' => $replies,
 						'likes' => $likes,
@@ -358,7 +364,7 @@ class TwitterScraper
 	 */
 	protected function save(array $tweets, bool $partials)
 	{
-		if ((!$partials && $this->pathToFile !== null) || ($this->pathToFile !== null && $this->saveClosure === null)) {
+		if ((!$partials && $this->pathToFile !== null && !$this->clearAfterEventSave) || ($this->pathToFile !== null && $this->saveClosure === null)) {
 			file_put_contents($this->pathToFile, json_encode(array_values($tweets)));
 		}
 
@@ -366,6 +372,10 @@ class TwitterScraper
 			$closure = $this->saveClosure;
 
 			$closure(array_values($tweets));
+
+			if ($this->clearAfterEventSave) {
+				$this->tweets = [];
+			}
 		}
 	}
 }
