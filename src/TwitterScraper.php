@@ -39,9 +39,6 @@ class TwitterScraper
 	/** @var array */
 	protected $tweets = [];
 
-	/** @var string */
-	protected $pathToFile;
-
 	/** @var bool */
 	protected $saveEveryPass = false;
 
@@ -54,6 +51,14 @@ class TwitterScraper
 	/** @var bool */
 	private $clearAfterEventSave = false;
 
+	/** @var int */
+	private $chunkSize = 100;
+
+	/**
+	 * TwitterScraper constructor.
+	 * @param $timeout
+	 * @throws Exception
+	 */
 	private function __construct($timeout)
 	{
 		$this->client = new Client();
@@ -77,6 +82,7 @@ class TwitterScraper
 	/**
 	 * @param int $timeout
 	 * @return TwitterScraper
+	 * @throws Exception
 	 */
 	public static function make($timeout = self::TIMEOUT)
 	{
@@ -90,6 +96,17 @@ class TwitterScraper
 	public function setLang(string $lang)
 	{
 		$this->lang = $lang;
+		return $this;
+	}
+
+
+	/**
+	 * @param int $size
+	 * @return $this
+	 */
+	public function setChunkSize(int $size)
+	{
+		$this->chunkSize = $size;
 		return $this;
 	}
 
@@ -108,32 +125,12 @@ class TwitterScraper
 	}
 
 	/**
-	 * @param string $filepath
-	 * @return $this
-	 */
-	public function setSaveFile(string $filepath)
-	{
-		$this->pathToFile = $filepath;
-		return $this;
-	}
-
-	/**
-	 * @param bool $flag
-	 * @return $this
-	 */
-	public function saveEveryPass(bool $flag = null)
-	{
-		$this->saveEveryPass = $flag !== null ? $flag : !$this->saveEveryPass;
-		return $this;
-	}
-
-	/**
 	 * @return $this
 	 */
 	public function run()
 	{
-		$this->tweets = $this->query($this->query, $this->startDate, $this->endDate);
-		$this->save($this->tweets, false);
+		$this->query($this->query, $this->startDate, $this->endDate);
+		$this->processSave();
 
 		return $this;
 	}
@@ -143,7 +140,7 @@ class TwitterScraper
 	 * @param bool $shouldClear
 	 * @return $this
 	 */
-	public function onSave(callable $closure, $shouldClear = false)
+	public function save(callable $closure, $shouldClear = false)
 	{
 		$this->saveClosure = $closure;
 		$this->clearAfterEventSave = $shouldClear;
@@ -162,7 +159,6 @@ class TwitterScraper
 	 * @param string $query
 	 * @param DateTime|null $start
 	 * @param DateTime|null $end
-	 * @return array|mixed|null
 	 */
 	protected function query(string $query, ?DateTime $start = null, ?DateTime $end = null)
 	{
@@ -178,20 +174,15 @@ class TwitterScraper
 
 
 		$retries = 1;
-		$tweets = null;
-		$lastDate = $end;
+		$lastDate = null;
 		while ($retries < 5) {
 			try {
-				list($tweets, $lastDate) = $this->queryInterval(rawurlencode($query));
+				$lastDate = $this->queryInterval(rawurlencode($query));
 				$retries = 5;
 			} catch (Exception | GuzzleException $e) {
 				sleep($retries);
 				$retries++;
 			}
-		}
-
-		if ($this->saveEveryPass && !empty($tweets)) {
-			$this->save($tweets, true);
 		}
 
 		if ($lastDate !== null) {
@@ -201,22 +192,18 @@ class TwitterScraper
 		if ($start !== null && $lastDate > $start && !empty($tweets)) {
 			$this->pass++;
 			$this->logProgress();
-			$tweets = array_merge($tweets, $this->query($this->query, $start, $lastDate));
+			$this->query($this->query, $start, $lastDate);
 		}
-
-		return $tweets;
 	}
 
 	/**
 	 * @param string $query
-	 * @return array
+	 * @return null|DateTime
 	 * @throws GuzzleException
 	 * @throws Exception
 	 */
 	protected function queryInterval(string $query)
 	{
-
-		$tweets = [];
 		$oldestTweetDate = null;
 
 		$firstPage = true;
@@ -273,7 +260,7 @@ class TwitterScraper
 			}
 
 
-			$crawler->filter('div.tweet')->each(function (Crawler $tweet) use (&$tweets, &$oldestTweetDate) {
+			$crawler->filter('div.tweet')->each(function (Crawler $tweet) use (&$oldestTweetDate) {
 				if ($tweet->filter('.Tombstone')->count() !== 0) {
 					return;
 				}
@@ -310,11 +297,11 @@ class TwitterScraper
 					$replying[$replyingNode->attr('data-user-id')] = $replyingNode->text();
 				});
 
-				if (!array_key_exists($tid, $tweets)) {
+				if (!array_key_exists($tid, $this->tweets)) {
 					$this->fetchedTweets++;
 
 
-					$tweets[$tid] = [
+					$this->tweets[$tid] = [
 						'tweetId' => $tid,
 						'url' => $url,
 						'text' => $text,
@@ -330,6 +317,10 @@ class TwitterScraper
 						'images' => $images,
 						'replying' => $replying,
 					];
+
+					if($this->fetchedTweets % $this->chunkSize === 0) {
+						$this->processSave();
+					}
 				}
 
 				$oldestTweetDate = $date;
@@ -345,7 +336,7 @@ class TwitterScraper
 			$requestUrl = "https://twitter.com/i/search/timeline?f=tweets&vertical=default&include_available_features=1&include_entities=1&reset_error_state=false&src=typd&max_position={$currentPosition}&q={$query}&l={$this->lang}";
 		} while ($hasAnotherPage);
 
-		return [$tweets, $oldestTweetDate];
+		return $oldestTweetDate;
 	}
 
 	protected function logProgress()
@@ -358,23 +349,16 @@ class TwitterScraper
 		echo sprintf('[TRY=%s][%s]', $try, $message);
 	}
 
-	/**
-	 * @param array $tweets
-	 * @param bool $partials
-	 */
-	protected function save(array $tweets, bool $partials)
+	protected function processSave()
 	{
-		if ((!$partials && $this->pathToFile !== null && !$this->clearAfterEventSave) || ($this->pathToFile !== null && $this->saveClosure === null)) {
-			file_put_contents($this->pathToFile, json_encode(array_values($tweets)));
-		}
-
-		if ($this->saveClosure !== null && ($this->saveEveryPass && $partials)) {
+		if ($this->saveClosure !== null) {
 			$closure = $this->saveClosure;
 
-			$closure(array_values($tweets));
+			$closure(array_values($this->tweets));
 
 			if ($this->clearAfterEventSave) {
 				$this->tweets = [];
+				gc_collect_cycles();
 			}
 		}
 	}
