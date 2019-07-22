@@ -225,6 +225,11 @@ class TwitterScraper
 
 				$date = DateTime::createFromFormat('D M d H:i:s O Y', $scrapedTweet['created_at']);
 
+				$replyTo = null;
+				if ($scrapedTweet['in_reply_to_user_id'] !== null){
+					$replyTo = [$scrapedTweet['in_reply_to_user_id'] => $scrapedTweet['in_reply_to_screen_name']];
+				}
+
 				if (!array_key_exists($scrapedTweet['id'], $this->tweets)) {
 					$this->fetchedTweets++;
 
@@ -242,7 +247,7 @@ class TwitterScraper
 						'hashtags' => $hashtags,
 						'mentions' => $mentions,
 						'images' => $images,
-						'reply_to' => $scrapedTweet['in_reply_to_user_id'],
+						'reply_to' => $replyTo,
 						'lang' => $scrapedTweet['lang'],
 					];
 					if ($this->fetchedTweets % $this->chunkSize === 0) {
