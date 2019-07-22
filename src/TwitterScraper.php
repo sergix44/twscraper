@@ -242,7 +242,7 @@ class TwitterScraper
 						'hashtags' => $hashtags,
 						'mentions' => $mentions,
 						'images' => $images,
-						'replying_to_user' => $scrapedTweet['in_reply_to_user_id'],
+						'reply_to' => $scrapedTweet['in_reply_to_user_id'],
 						'lang' => $scrapedTweet['lang'],
 					];
 					if ($this->fetchedTweets % $this->chunkSize === 0) {
