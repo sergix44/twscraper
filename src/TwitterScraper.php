@@ -1,19 +1,15 @@
 <?php
-
-
 namespace SergiX44\Scraper;
-
 
 use Campo\UserAgent;
 use DateTime;
 use Exception;
-use Goutte\Client;
+use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
-use Symfony\Component\DomCrawler\Crawler;
 
 class TwitterScraper
 {
-	const TIMEOUT = 10;
+	const TIMEOUT = 20;
 
 	/** @var array */
 	protected $options;
@@ -23,9 +19,6 @@ class TwitterScraper
 
 	/** @var int */
 	protected $fetchedTweets = 0;
-
-	/** @var int */
-	protected $pass = 1;
 
 	/** @var string */
 	protected $query;
@@ -39,14 +32,11 @@ class TwitterScraper
 	/** @var array */
 	protected $tweets = [];
 
-	/** @var bool */
-	protected $saveEveryPass = false;
-
 	/** @var callable */
 	protected $saveClosure;
 
 	/** @var string */
-	private $lang = 'en';
+	private $lang = null;
 
 	/** @var bool */
 	private $clearAfterEventSave = false;
@@ -61,22 +51,14 @@ class TwitterScraper
 	 */
 	private function __construct($timeout)
 	{
-		$this->client = new Client();
-		$this->setOptions($timeout);
-	}
-
-	/**
-	 * @param int $timeout
-	 * @throws Exception
-	 */
-	private function setOptions($timeout = self::TIMEOUT)
-	{
 		$this->options = [
 			'timeout' => $timeout,
 			'headers' => [
-				'User-Agent' => UserAgent::random(['os_type' => 'Windows', 'device_type' => 'Desktop']),
+				'User-Agent' => UserAgent::random(['os_type' => 'Windows', 'device_type' => 'Desktop', 'agent_name' => 'Chrome']),
 			],
 		];
+
+		$this->client = new Client($this->options);
 	}
 
 	/**
@@ -126,6 +108,7 @@ class TwitterScraper
 
 	/**
 	 * @return $this
+	 * @throws GuzzleException
 	 */
 	public function run()
 	{
@@ -159,6 +142,7 @@ class TwitterScraper
 	 * @param string $query
 	 * @param DateTime|null $start
 	 * @param DateTime|null $end
+	 * @throws GuzzleException
 	 */
 	protected function query(string $query, ?DateTime $start = null, ?DateTime $end = null)
 	{
@@ -172,6 +156,9 @@ class TwitterScraper
 			$query .= " until:{$end->format('Y-m-d')}";
 		}
 
+		if ($this->lang !== null) {
+			$query .= " lang:{$this->lang}";
+		}
 
 		$retries = 1;
 		$lastDate = null;
@@ -179,174 +166,111 @@ class TwitterScraper
 			try {
 				$lastDate = $this->queryInterval(rawurlencode($query));
 				$retries = 5;
-			} catch (Exception | GuzzleException $e) {
+			} catch (Exception $e) {
 				sleep($retries);
 				$retries++;
 			}
 		}
-
 		if ($lastDate !== null) {
 			$lastDate->setTime(0, 0, 0);
 		}
 
-		if ($start !== null && $lastDate > $start && !empty($tweets)) {
-			$this->pass++;
-			$this->logProgress();
+		if ($start !== null && $lastDate > $start) {
 			$this->query($this->query, $start, $lastDate);
 		}
 	}
 
-	/**
-	 * @param string $query
-	 * @return null|DateTime
-	 * @throws GuzzleException
-	 * @throws Exception
-	 */
 	protected function queryInterval(string $query)
 	{
 		$oldestTweetDate = null;
+		$html = $this->client->request('GET', "https://mobile.twitter.com/search?q={$query}")->getBody()->getContents();
 
-		$firstPage = true;
-		$hasAnotherPage = true;
-		$currentPosition = null;
-		$failState = false;
-		$requestUrl = "https://twitter.com/search?f=tweets&vertical=default&q={$query}&src=typd&qf=off&l={$this->lang}";
+		$matches = [];
+		preg_match('/gt=(\d+)/', $html, $matches);
+
+		$this->options['headers']['Authorization'] = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+		$this->options['headers']['X-Guest-Token'] = $matches[1];
+
+		$this->client = new Client($this->options);
+
+		$shouldScroll = true;
+		$cursor = '';
 		do {
-
-			if ($firstPage) {
-				$retries = 0;
-				do {
-					$this->logTry($retries, 'FIRST PAGE');
-					$crawler = $this->client->request('GET', $requestUrl, $this->options);
-					$retries++;
-				} while (
-					$crawler->filter('.SearchEmptyTimeline')->count() === 0
-					&& $crawler->filter('div.tweet')->count() === 0
-					&& $retries < 6
-					&& sleep($retries) === 0
-				);
-
-				if ($crawler->filter('.SearchEmptyTimeline')->count() !== 0) {
-					$hasAnotherPage = false;
-				}
-
-			} else {
-				$result = null;
-				$retries = 0;
-				do {
-					$this->logTry($retries, 'NEXT PAGE');
-					$result = $this->client->getClient()->request('GET', $requestUrl, $this->options)->getBody()->getContents();
-					$retries++;
-				} while (
-					empty($result)
-					&& $retries < 6
-					&& sleep($retries) === 0
-				);
-
-				if (empty($result)) {
-					if ($failState) {
-						throw new Exception('Cannot exit from the current failstate.');
-					}
-
-					$this->setOptions();
-					$failState = true;
-					continue;
-				}
-
-				$json = json_decode($result);
-				$hasAnotherPage = $json->has_more_items;
-				$currentPosition = $json->min_position;
-				$crawler = new Crawler($json->items_html);
-			}
+			$response = $this->client->request('GET', "https://api.twitter.com/2/search/adaptive.json?include_profile_interstitial_type=1&include_blocking=1&include_blocked_by=1&include_followed_by=1&include_want_retweets=&include_mute_edge=1&include_can_dm=1&include_can_media_tag=1&skip_status=1&cards_platform=Web-12&include_cards=1&include_composer_source=true&include_ext_alt_text=true&include_reply_count=1&tweet_mode=extended&include_entities=true&include_user_entities=true&include_ext_media_color=true&include_ext_media_availability=true&send_error_codes=true&q={$query}&tweet_search_mode=live&count={$this->chunkSize}&query_source=typed_query&cursor={$cursor}&pc=1&spelling_corrections=1&ext=mediaStats%2ChighlightedLabel%2CcameraMoment");
+			$json = json_decode($response->getBody()->getContents(), true);
 
 
-			$crawler->filter('div.tweet')->each(function (Crawler $tweet) use (&$oldestTweetDate) {
-				if ($tweet->filter('.Tombstone')->count() !== 0) {
-					return;
-				}
-				$tid = $tweet->attr('data-tweet-id');
-				$url = 'https://twitter.com' . $tweet->attr('data-permalink-path');
-				$userId = $tweet->filter('.account-group')->first()->attr('data-user-id');
-				$username = $tweet->filter('.username')->first()->text();
-				$userfullname = $tweet->filter('.fullname')->first()->text();
-				$likes = (int)$tweet->filter('.ProfileTweet-action--favorite > .ProfileTweet-actionButton > .ProfileTweet-actionCount > span.ProfileTweet-actionCountForPresentation')->first()->text();
-				$retweets = (int)$tweet->filter('.ProfileTweet-action--retweet > .ProfileTweet-actionButton > .ProfileTweet-actionCount > span.ProfileTweet-actionCountForPresentation')->first()->text();
-				$replies = (int)$tweet->filter('.ProfileTweet-action--reply > .ProfileTweet-actionButton > .ProfileTweet-actionCount > span.ProfileTweet-actionCountForPresentation')->first()->text();
-				$text = $tweet->filter('.tweet-text')->first()->text();
+			foreach ($json['globalObjects']['tweets'] as $scrapedTweet) {
 
-				$date = new DateTime();
-				$date->setTimestamp((int)$tweet->filter('._timestamp')->first()->attr('data-time'));
+				$url = "https://twitter.com/{$json['globalObjects']['users'][$scrapedTweet['user_id']]['screen_name']}/status/{$scrapedTweet['id']}";
 
 				$hashtags = [];
-				$tweet->filter('.twitter-hashtag')->each(function (Crawler $hashtagNode) use (&$hashtags) {
-					$hashtags[] = $hashtagNode->text();
-				});
-
-				$images = [];
-				$tweet->filter('.AdaptiveMedia-photoContainer')->each(function (Crawler $imagesNode) use (&$images) {
-					$images[] = $imagesNode->attr('data-image-url');
-				});
+				foreach ($scrapedTweet['entities']['hashtags'] as $hashtag) {
+					$hashtags[] = "#{$hashtag['text']}";
+				}
 
 				$mentions = [];
-				$tweet->filter('.twitter-atreply')->each(function (Crawler $mentionsNode) use (&$mentions) {
-					$mentions[$mentionsNode->attr('data-mentioned-user-id')] = $mentionsNode->text();
-				});
+				foreach ($scrapedTweet['entities']['user_mentions'] as $mention) {
+					$mentions[$mention['id']] = $mention['screen_name'];
+				}
 
-				$replying = [];
-				$tweet->filter('.ReplyingToContextBelowAuthor > .pretty-link')->each(function (Crawler $replyingNode) use (&$replying) {
-					$replying[$replyingNode->attr('data-user-id')] = $replyingNode->text();
-				});
+				$images = [];
+				if (isset($scrapedTweet['entities']['media'])) {
+					foreach ($scrapedTweet['entities']['media'] as $key => $image) {
+						if ($image['type'] === 'photo') {
+							$images[] = $image['media_url_https'];
+						}
+					}
+				}
 
-				if (!array_key_exists($tid, $this->tweets)) {
+				$date = DateTime::createFromFormat('D M d H:i:s O Y', $scrapedTweet['created_at']);
+
+				if (!array_key_exists($scrapedTweet['id'], $this->tweets)) {
 					$this->fetchedTweets++;
 
-
-					$this->tweets[$tid] = [
-						'tweetId' => $tid,
+					$this->tweets[$scrapedTweet['id']] = [
+						'tweetId' => $scrapedTweet['id'],
 						'url' => $url,
-						'text' => $text,
+						'text' => $scrapedTweet['full_text'],
 						'datetime' => $date,
-						'user_id' => $userId,
-						'user_name' => $username,
-						'user_fullname' => $userfullname,
-						'retweets' => $retweets,
-						'replies' => $replies,
-						'likes' => $likes,
+						'user_id' => $scrapedTweet['user_id'],
+						'user_name' => $json['globalObjects']['users'][$scrapedTweet['user_id']]['screen_name'],
+						'user_fullname' => $json['globalObjects']['users'][$scrapedTweet['user_id']]['name'],
+						'retweets' => $scrapedTweet['retweet_count'],
+						'replies' => $scrapedTweet['reply_count'],
+						'likes' => $scrapedTweet['favorite_count'],
 						'hashtags' => $hashtags,
 						'mentions' => $mentions,
 						'images' => $images,
-						'replying' => $replying,
+						'replying_to_user' => $scrapedTweet['in_reply_to_user_id'],
+						'lang' => $scrapedTweet['lang'],
 					];
-
-					if($this->fetchedTweets % $this->chunkSize === 0) {
+					if ($this->fetchedTweets % $this->chunkSize === 0) {
 						$this->processSave();
 					}
 				}
-
 				$oldestTweetDate = $date;
-			});
-
-			if ($firstPage && $crawler->filter('#timeline > div')->count() !== 0) {
-				$currentPosition = $crawler->filter('#timeline > div')->first()->attr('data-min-position');
 			}
 
-			$this->logProgress();
+			// get the next cursor
+			$entries = $json['timeline']['instructions'];
+			$entries = $entries[count($entries) - 1]; // get last element
+			if (isset($entries['addEntries'])) {
+				$entries = $entries['addEntries']['entries'];
+				$entries = $entries[count($entries) - 1]; // get last element
+			} else {
+				$entries = $entries['replaceEntry']['entry'];
+			}
 
-			$firstPage = false;
-			$requestUrl = "https://twitter.com/i/search/timeline?f=tweets&vertical=default&include_available_features=1&include_entities=1&reset_error_state=false&src=typd&max_position={$currentPosition}&q={$query}&l={$this->lang}";
-		} while ($hasAnotherPage);
+			$newCursor = $entries['content']['operation']['cursor']['value'];
+			if ($newCursor === $cursor) {
+				$shouldScroll = false;
+			}
+			$cursor = $newCursor;
+
+		} while ($shouldScroll);
 
 		return $oldestTweetDate;
-	}
-
-	protected function logProgress()
-	{
-		echo sprintf('[PASS=%s][TWEETS=%s]' . PHP_EOL, $this->pass, $this->fetchedTweets);
-	}
-
-	protected function logTry($try, $message)
-	{
-		echo sprintf('[TRY=%s][%s]', $try, $message);
 	}
 
 	protected function processSave()
@@ -354,7 +278,7 @@ class TwitterScraper
 		if ($this->saveClosure !== null) {
 			$closure = $this->saveClosure;
 
-			$closure(array_values($this->tweets));
+			$closure(array_values($this->tweets), $this->fetchedTweets);
 
 			if ($this->clearAfterEventSave) {
 				$this->tweets = [];
