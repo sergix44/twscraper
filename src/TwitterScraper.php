@@ -241,6 +241,8 @@ class TwitterScraper
 						'user_id' => $scrapedTweet['user_id'],
 						'user_name' => $json['globalObjects']['users'][$scrapedTweet['user_id']]['screen_name'],
 						'user_fullname' => $json['globalObjects']['users'][$scrapedTweet['user_id']]['name'],
+						'user_followers' => $json['globalObjects']['users'][$scrapedTweet['user_id']]['followers_count'],
+						'user_following' => $json['globalObjects']['users'][$scrapedTweet['user_id']]['friends_count'],
 						'retweets' => $scrapedTweet['retweet_count'],
 						'replies' => $scrapedTweet['reply_count'],
 						'likes' => $scrapedTweet['favorite_count'],
