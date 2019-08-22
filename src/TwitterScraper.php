@@ -207,7 +207,7 @@ class TwitterScraper
 	protected function queryInterval(string $query)
 	{
 		$oldestTweetDate = null;
-		$html = $this->client->request('GET', "https://mobile.twitter.com/search?q={$query}")->getBody()->getContents();
+		$html = $this->client->request('GET', "https://mobile.twitter.com/search?src=typed_query&f=live&q={$query}")->getBody()->getContents();
 
 		$matches = [];
 		preg_match('/gt=(\d+)/', $html, $matches);
