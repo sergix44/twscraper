@@ -1,10 +1,12 @@
 <?php
+
 namespace SergiX44\Scraper;
 
 use Campo\UserAgent;
 use DateTime;
 use Exception;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\GuzzleException;
 
 class TwitterScraper
@@ -44,6 +46,9 @@ class TwitterScraper
 	/** @var int */
 	private $chunkSize = 100;
 
+	/** @var int */
+	private $timeout;
+
 	/**
 	 * TwitterScraper constructor.
 	 * @param $timeout
@@ -51,10 +56,16 @@ class TwitterScraper
 	 */
 	private function __construct($timeout)
 	{
+		$this->timeout = $timeout;
+		$this->refreshClient();
+	}
+
+	private function refreshClient()
+	{
 		$this->options = [
-			'timeout' => $timeout,
+			'timeout' => $this->timeout,
 			'headers' => [
-				'User-Agent' => UserAgent::random(['os_type' => 'Windows', 'device_type' => 'Desktop', 'agent_name' => 'Chrome']),
+				'User-Agent' => $this->generateUserAgent(),
 			],
 		];
 
@@ -146,13 +157,24 @@ class TwitterScraper
 	 */
 	protected function query(string $query, ?DateTime $start = null, ?DateTime $end = null)
 	{
-		if ($start !== null && strpos($query, 'since') === false) {
-			$start->setTime(0, 0, 0);
+		if ($start === null) {
+			$start = new DateTime('2006-03-01');
+		}
+
+		if ($end === null) {
+			$end = new DateTime();
+		}
+
+		$start->setTime(0, 0, 0);
+		$start->setTimezone(new \DateTimeZone('+00:00'));
+		$end->setTime(0, 0, 0);
+		$end->setTimezone(new \DateTimeZone('+00:00'));
+
+		if (strpos($query, 'since') === false) {
 			$query .= " since:{$start->format('Y-m-d')}";
 		}
 
-		if ($end !== null && strpos($query, 'until') === false) {
-			$end->setTime(0, 0, 0);
+		if (strpos($query, 'until') === false) {
 			$query .= " until:{$end->format('Y-m-d')}";
 		}
 
@@ -167,16 +189,18 @@ class TwitterScraper
 				$lastDate = $this->queryInterval(rawurlencode($query));
 				$retries = 5;
 			} catch (Exception $e) {
+				$this->refreshClient();
 				sleep($retries);
 				$retries++;
 			}
 		}
 		if ($lastDate !== null) {
 			$lastDate->setTime(0, 0, 0);
-		}
 
-		if ($start !== null && $lastDate > $start) {
-			$this->query($this->query, $start, $lastDate);
+			if ($lastDate > $start) {
+				$this->refreshClient();
+				$this->query($this->query, $start, $lastDate);
+			}
 		}
 	}
 
@@ -196,7 +220,14 @@ class TwitterScraper
 		$shouldScroll = true;
 		$cursor = '';
 		do {
-			$response = $this->client->request('GET', "https://api.twitter.com/2/search/adaptive.json?include_profile_interstitial_type=1&include_blocking=1&include_blocked_by=1&include_followed_by=1&include_want_retweets=&include_mute_edge=1&include_can_dm=1&include_can_media_tag=1&skip_status=1&cards_platform=Web-12&include_cards=1&include_composer_source=true&include_ext_alt_text=true&include_reply_count=1&tweet_mode=extended&include_entities=true&include_user_entities=true&include_ext_media_color=true&include_ext_media_availability=true&send_error_codes=true&q={$query}&tweet_search_mode=live&count={$this->chunkSize}&query_source=typed_query&cursor={$cursor}&pc=1&spelling_corrections=1&ext=mediaStats%2ChighlightedLabel%2CcameraMoment");
+			try {
+				$response = $this->client->request('GET', "https://api.twitter.com/2/search/adaptive.json?include_profile_interstitial_type=1&include_blocking=1&include_blocked_by=1&include_followed_by=1&include_want_retweets=&include_mute_edge=1&include_can_dm=1&include_can_media_tag=1&skip_status=1&cards_platform=Web-12&include_cards=1&include_composer_source=true&include_ext_alt_text=true&include_reply_count=1&tweet_mode=extended&include_entities=true&include_user_entities=true&include_ext_media_color=true&include_ext_media_availability=true&send_error_codes=true&q={$query}&tweet_search_mode=live&count={$this->chunkSize}&query_source=typed_query&cursor={$cursor}&pc=1&spelling_corrections=1&ext=mediaStats%2ChighlightedLabel%2CcameraMoment");
+			} catch (ClientException $ce) {
+				if ($ce->getCode() === 429) { // too many requests, refresh client and restrict interval
+					return $oldestTweetDate;
+				}
+				throw $ce; // something else was gone wrong
+			}
 			$json = json_decode($response->getBody()->getContents(), true);
 
 
@@ -226,7 +257,7 @@ class TwitterScraper
 				$date = DateTime::createFromFormat('D M d H:i:s O Y', $scrapedTweet['created_at']);
 
 				$replyTo = null;
-				if ($scrapedTweet['in_reply_to_user_id'] !== null){
+				if ($scrapedTweet['in_reply_to_user_id'] !== null) {
 					$replyTo = [$scrapedTweet['in_reply_to_user_id'] => $scrapedTweet['in_reply_to_screen_name']];
 				}
 
@@ -252,6 +283,7 @@ class TwitterScraper
 						'reply_to' => $replyTo,
 						'lang' => $scrapedTweet['lang'],
 					];
+
 					if ($this->fetchedTweets % $this->chunkSize === 0) {
 						$this->processSave();
 					}
@@ -289,8 +321,16 @@ class TwitterScraper
 
 			if ($this->clearAfterEventSave) {
 				$this->tweets = [];
-				gc_collect_cycles();
 			}
 		}
+	}
+
+	/**
+	 * @return string
+	 * @throws Exception
+	 */
+	private function generateUserAgent()
+	{
+		return UserAgent::random(['os_type' => ['Windows', 'OS X', 'Linux'], 'device_type' => 'Desktop', 'agent_name' => 'Chrome']);
 	}
 }
