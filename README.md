@@ -14,7 +14,7 @@ $scraper = TwitterScraper::make()
 	->setLang('en')// optional
 	->save(function ($tweets, $totalTweets) { // optional
 		//...
-	})
+	}, true) // call gc?
 	->setChunkSize(100)// optional
 	->run();
 
