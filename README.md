@@ -10,7 +10,7 @@ Example usage:
 use SergiX44\Scraper\TwitterScraper;
 
 $scraper = TwitterScraper::make()
-	->search('near:Brenzone within:2km filter:images filter:hashtags', new DateTime('2019-06-15'), new DateTime('2019-07-22'))
+	->search('near:Verona within:2km filter:images filter:hashtags', new DateTime('2019-06-15'), new DateTime('2019-07-22'))
 	->setLang('en')// optional
 	->save(function ($tweets, $totalTweets) { // optional
 		//...
