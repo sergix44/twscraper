@@ -20,3 +20,4 @@ $scraper = TwitterScraper::make()
 
 $tweets = $scraper->getTweets();
 ```
+WARNING: if the GC call is set to true, the method getTweets will return only the latest chunk of tweets!
