@@ -1,6 +1,5 @@
 {
   "name": "sergix44/twscraper",
-  "version": "3.1.0",
   "description": "A fast and simple scraper for the Twitter advanced search.",
   "keywords": [
     "twitter",
@@ -9,17 +8,20 @@
   "homepage": "https://github.com/sergix44/twscraper",
   "license": "MIT",
   "require": {
-    "php": "^7.1",
+    "php": ">=7.4",
     "ext-json": "*",
     "campo/random-user-agent": "^1.3",
-    "guzzlehttp/guzzle": "~6.0"
+    "guzzlehttp/guzzle": "~7.4.1"
+  },
+  "require-dev": {
+    "roave/security-advisories": "dev-latest"
   },
   "config": {
     "sort-packages": true
   },
   "autoload": {
     "psr-4": {
-      "SergiX44\\Scraper\\": [
+      "SergiX44\\Twitter\\": [
         "src"
       ]
     }
